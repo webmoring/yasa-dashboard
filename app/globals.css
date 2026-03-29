@@ -1,0 +1,42 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --joseon-dark: #1a1a2e;
+  --joseon-navy: #16213e;
+  --joseon-accent: #e94560;
+  --joseon-gold: #d4a574;
+}
+
+body {
+  background: #0f0f1a;
+  color: #e0e0e0;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: #1a1a2e; }
+::-webkit-scrollbar-thumb { background: #333; border-radius: 3px; }
+
+/* Step indicator animation */
+@keyframes pulse-glow {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(233, 69, 96, 0.4); }
+  50% { box-shadow: 0 0 0 8px rgba(233, 69, 96, 0); }
+}
+
+.pulse-active {
+  animation: pulse-glow 2s ease-in-out infinite;
+}
+
+/* Story card hover */
+.story-card {
+  transition: all 0.2s ease;
+}
+.story-card:hover {
+  transform: translateY(-2px);
+}
+.story-card.selected {
+  border-color: var(--joseon-accent);
+  background: rgba(233, 69, 96, 0.08);
+}
