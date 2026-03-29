@@ -1,4 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { saveState, loadState } from '@/lib/state'
+
+export const maxDuration = 60 // Pro plan: 60s timeout
 
 // Phase 3~5: Asset Production → Video Assembly → Upload
 // For Vercel deployment, this orchestrates API calls to external services

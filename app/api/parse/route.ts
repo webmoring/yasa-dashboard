@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import Anthropic from '@anthropic-ai/sdk'
 import { getStoryCardSchema, PARSING_PROMPT } from '@/lib/schemas'
+import { saveState } from '@/lib/state'
+
+export const maxDuration = 60 // Pro plan: 60s timeout
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! })
 
@@ -64,9 +67,21 @@ export async function POST(req: NextRequest) {
       required.every(f => s[f] !== undefined && s[f] !== null && s[f] !== '')
     )
 
+    const currentBatchId = batch_id || new Date().toISOString().slice(2, 10).replace(/-/g, '')
+
+    // Save state server-side so refresh doesn't lose data
+    await saveState(currentBatchId, {
+      step: 'selecting',
+      stories: valid,
+      batch_id: currentBatchId,
+      parsed_count: stories.length,
+      valid_count: valid.length,
+      updated_at: new Date().toISOString(),
+    })
+
     return NextResponse.json({
       stories: valid,
-      batch_id: batch_id || new Date().toISOString().slice(2, 10).replace(/-/g, ''),
+      batch_id: currentBatchId,
       parsed_count: stories.length,
       valid_count: valid.length,
     })

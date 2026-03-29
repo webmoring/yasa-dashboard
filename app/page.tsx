@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect } from 'react'
 
 // ── Types ──
 interface StoryCard {
@@ -20,6 +20,7 @@ interface StoryCard {
   korean_lesson_meaning: string
   cultural_significance: string
   western_appeal: string
+  title_en?: string
 }
 
 interface EpisodeScript {
@@ -86,18 +87,60 @@ export default function Dashboard() {
   const [log, setLog] = useState<string[]>([])
   const [error, setError] = useState<string | null>(null)
   const [progress, setProgress] = useState({ current: 0, total: 0, label: '' })
-
-  const batchId = new Date().toISOString().slice(2, 10).replace(/-/g, '')
+  const [batchId, setBatchId] = useState(new Date().toISOString().slice(2, 10).replace(/-/g, ''))
+  const [isRestoring, setIsRestoring] = useState(true)
 
   const addLog = useCallback((msg: string) => {
     setLog(prev => [...prev, `[${new Date().toLocaleTimeString('ko-KR')}] ${msg}`])
   }, [])
+
+  // ── Restore state on page load ──
+  useEffect(() => {
+    async function restoreState() {
+      try {
+        const res = await fetch('/api/state')
+        const data = await res.json()
+        if (data.found && data.state) {
+          const s = data.state
+          setBatchId(s.batch_id)
+
+          if (s.stories && s.stories.length > 0) {
+            setStories(s.stories)
+          }
+          if (s.selectedIds && s.selectedIds.length > 0) {
+            setSelectedIds(new Set(s.selectedIds))
+          }
+          if (s.scripts && s.scripts.length > 0) {
+            setScripts(s.scripts)
+          }
+
+          // Restore to appropriate step
+          if (s.step === 'reviewing' || (s.scripts && s.scripts.length > 0)) {
+            setStep('reviewing')
+            addLog('이전 세션 복원: 스크립트 검토 단계')
+          } else if (s.step === 'selecting' || (s.stories && s.stories.length > 0)) {
+            setStep('selecting')
+            addLog('이전 세션 복원: 스토리 선택 단계')
+          }
+        }
+      } catch (e) {
+        console.log('No previous state to restore')
+      } finally {
+        setIsRestoring(false)
+      }
+    }
+    restoreState()
+  }, [addLog])
 
   // ── Step 1: Parse Stories ──
   const handleParse = async () => {
     setStep('parsing')
     setError(null)
     setLog([])
+    setScripts([])
+    setSelectedIds(new Set())
+    const newBatchId = new Date().toISOString().slice(2, 10).replace(/-/g, '')
+    setBatchId(newBatchId)
     addLog('파싱 시작...')
     setProgress({ current: 0, total: 1, label: 'Claude API로 야사 스토리 파싱 중...' })
 
@@ -105,7 +148,7 @@ export default function Dashboard() {
       const res = await fetch('/api/parse', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ count: 10, batch_id: batchId }),
+        body: JSON.stringify({ count: 10, batch_id: newBatchId }),
       })
 
       if (!res.ok) {
@@ -137,7 +180,7 @@ export default function Dashboard() {
     })
   }
 
-  // ── Step 3: Generate Scripts ──
+  // ── Step 3: Generate Scripts (one at a time) ──
   const handleGenerateScripts = async () => {
     setStep('generating')
     setError(null)
@@ -145,27 +188,50 @@ export default function Dashboard() {
     addLog(`${selected.length}개 스토리 선택 → 스크립트 생성 시작...`)
     setProgress({ current: 0, total: selected.length, label: '스크립트 생성 중...' })
 
-    try {
-      const res = await fetch('/api/generate-scripts', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ stories: selected, batch_id: batchId }),
-      })
+    // Save selection to server
+    await fetch('/api/state', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ batch_id: batchId, selectedIds: Array.from(selectedIds), step: 'generating' }),
+    })
 
-      if (!res.ok) {
-        const err = await res.json()
-        throw new Error(err.error || 'Script generation failed')
+    const generatedScripts: EpisodeScript[] = []
+
+    for (let i = 0; i < selected.length; i++) {
+      const story = selected[i]
+      addLog(`[${i + 1}/${selected.length}] "${story.title}" 스크립트 생성 중...`)
+      setProgress({ current: i, total: selected.length, label: `스크립트 ${i + 1}/${selected.length} 생성 중...` })
+
+      try {
+        const res = await fetch('/api/generate-scripts', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ story, batch_id: batchId, index: i, total: selected.length }),
+        })
+
+        if (!res.ok) {
+          const err = await res.json()
+          addLog(`  ❌ 오류: ${err.error}`)
+          continue
+        }
+
+        const data = await res.json()
+        generatedScripts.push(data.script)
+        setScripts([...generatedScripts]) // Update UI after each one
+        addLog(`  ✅ ${data.script.ep_id}: 완료`)
+      } catch (e: any) {
+        addLog(`  ❌ 네트워크 오류: ${e.message}`)
       }
+    }
 
-      // Stream response (scripts come one by one)
-      const data = await res.json()
-      setScripts(data.scripts)
-      addLog(`스크립트 생성 완료: ${data.scripts.length}개`)
-      setProgress({ current: data.scripts.length, total: selected.length, label: '스크립트 생성 완료' })
+    setScripts(generatedScripts)
+    setProgress({ current: selected.length, total: selected.length, label: '스크립트 생성 완료' })
+
+    if (generatedScripts.length > 0) {
+      addLog(`스크립트 생성 완료: ${generatedScripts.length}/${selected.length}개`)
       setStep('reviewing')
-    } catch (e: any) {
-      setError(e.message)
-      addLog(`오류: ${e.message}`)
+    } else {
+      setError('스크립트를 생성하지 못했습니다.')
       setStep('selecting')
     }
   }
@@ -205,7 +271,7 @@ export default function Dashboard() {
   }
 
   // ── Step Indicator ──
-  const steps = [
+  const allSteps = [
     { key: 'idle', label: '대기', icon: '🎬' },
     { key: 'parsing', label: '파싱', icon: '📖' },
     { key: 'selecting', label: '선택', icon: '✋' },
@@ -215,7 +281,17 @@ export default function Dashboard() {
     { key: 'complete', label: '완료', icon: '✅' },
   ]
 
-  const stepIndex = steps.findIndex(s => s.key === step)
+  const stepIndex = allSteps.findIndex(s => s.key === step)
+
+  // Loading state
+  if (isRestoring) {
+    return (
+      <div className="max-w-6xl mx-auto px-4 py-8 text-center">
+        <div className="text-4xl mb-4 animate-pulse">🎬</div>
+        <p className="text-gray-400">상태 복원 중...</p>
+      </div>
+    )
+  }
 
   return (
     <div className="max-w-6xl mx-auto px-4 py-8">
@@ -232,7 +308,7 @@ export default function Dashboard() {
 
       {/* Step Indicator */}
       <div className="flex items-center justify-center gap-1 mb-8 overflow-x-auto pb-2">
-        {steps.map((s, i) => (
+        {allSteps.map((s, i) => (
           <div key={s.key} className="flex items-center">
             <div className={`
               flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-all
@@ -243,7 +319,7 @@ export default function Dashboard() {
               <span>{s.icon}</span>
               <span>{s.label}</span>
             </div>
-            {i < steps.length - 1 && (
+            {i < allSteps.length - 1 && (
               <div className={`w-6 h-px mx-1 ${i < stepIndex ? 'bg-green-500/50' : 'bg-gray-700/30'}`} />
             )}
           </div>
@@ -339,8 +415,8 @@ export default function Dashboard() {
                 <div className="flex items-start justify-between mb-2">
                   <h3 className="text-white font-semibold text-sm leading-tight pr-3">
                     {story.title}
-                    {(story as any).title_en && (
-                      <span className="block text-gray-500 text-xs font-normal mt-0.5">{(story as any).title_en}</span>
+                    {story.title_en && (
+                      <span className="block text-gray-500 text-xs font-normal mt-0.5">{story.title_en}</span>
                     )}
                   </h3>
                   <span className={`shrink-0 px-2 py-0.5 rounded text-[10px] font-medium border ${CATEGORY_COLORS[story.category] || 'bg-gray-700 text-gray-300'}`}>
@@ -373,13 +449,28 @@ export default function Dashboard() {
         </div>
       )}
 
-      {/* ── Step: Generating Scripts (Loading) ── */}
+      {/* ── Step: Generating Scripts ── */}
       {step === 'generating' && (
-        <div className="text-center py-20">
+        <div className="text-center py-12">
           <div className="text-6xl mb-6 animate-pulse">📝</div>
           <h2 className="text-xl font-semibold text-white mb-3">스크립트 생성 중...</h2>
-          <p className="text-gray-400">선택된 6개 스토리의 에피소드 스크립트를 작성하고 있습니다.</p>
-          <p className="text-gray-500 text-sm mt-2">약 2-3분 소요됩니다.</p>
+          <p className="text-gray-400">1건씩 순차적으로 생성합니다. 각 스크립트당 약 30-50초 소요됩니다.</p>
+          <p className="text-joseon-accent font-mono text-lg mt-4">
+            {progress.current} / {progress.total}
+          </p>
+
+          {/* Show scripts as they come in */}
+          {scripts.length > 0 && (
+            <div className="mt-8 max-w-2xl mx-auto text-left space-y-2">
+              {scripts.map((ep) => (
+                <div key={ep.ep_id} className="bg-gray-900/50 border border-green-500/30 rounded-lg p-3 flex items-center gap-3">
+                  <span className="text-green-400">✅</span>
+                  <span className="text-xs font-mono text-gray-500">{ep.ep_id}</span>
+                  <span className="text-white text-sm">{ep.title}</span>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
 
