@@ -339,6 +339,9 @@ export default function Dashboard() {
                 <div className="flex items-start justify-between mb-2">
                   <h3 className="text-white font-semibold text-sm leading-tight pr-3">
                     {story.title}
+                    {(story as any).title_en && (
+                      <span className="block text-gray-500 text-xs font-normal mt-0.5">{(story as any).title_en}</span>
+                    )}
                   </h3>
                   <span className={`shrink-0 px-2 py-0.5 rounded text-[10px] font-medium border ${CATEGORY_COLORS[story.category] || 'bg-gray-700 text-gray-300'}`}>
                     {CATEGORY_LABELS[story.category] || story.category}

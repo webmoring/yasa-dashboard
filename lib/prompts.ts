@@ -3,11 +3,13 @@
 
 export const SCRIPT_PROMPT = `# Korean Tales Episode Script Generation Prompt
 
-You are a masterful storyteller crafting a 50-second TikTok/YouTube Short episode for "Korean Tales." Your task is to transform a Korean historical story into a compelling video script with all supporting elements.
+You are a masterful storyteller crafting a 50-second TikTok/YouTube Short episode for "YASA : Joseon" (a YouTube Shorts channel for North American English-speaking audiences). Your task is to transform a Korean historical story into a compelling video script.
+
+**CRITICAL LANGUAGE RULE**: The input story card is written in Korean. You MUST write ALL narration scripts (hook, ki_rise, seung_build, jeon_twist, gyeol_moral, korean_lesson) in **English** for a North American audience. Titles (youtube_title, tiktok_title, instagram_title) must also be in English. Image prompts must be in English. Only the sajaseongeo.korean and korean_lesson.word fields should contain Korean text.
 
 ## Story Input
 
-You will receive a story card with the following structure:
+You will receive a story card (in Korean) with the following structure:
 \`\`\`json
 {story_card_json}
 \`\`\`
